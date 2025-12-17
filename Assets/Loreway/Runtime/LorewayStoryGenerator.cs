@@ -1,4 +1,6 @@
 // File: Assets/Loreway/Runtime/LorewayStoryGenerator.cs
+// Purpose: Runtime generator for short horror scenes & dialogue
+// aligned with Cell / Loreway KG concepts.
 
 using System;
 using System.Collections.Generic;
@@ -7,8 +9,6 @@ using UnityEngine;
 
 namespace Cell.Loreway
 {
-    // ---------- CORE ENUMS & DATA VECTORS ----------
-
     public enum HorrorMode
     {
         Cosmic,
@@ -44,24 +44,23 @@ namespace Cell.Loreway
     [Serializable]
     public class SpeakerProfile
     {
-        public string Id;              // e.g. "CHRLOGKEEPER01"
-        public string DisplayName;     // in‑game name
-        public string StyleProfile;    // "shellshocked-matter-of-fact", "bureaucratic-cold"
+        public string Id;
+        public string DisplayName;
+        public string StyleProfile;
         public bool IsPlayer;
     }
 
     [Serializable]
     public class SceneContext
     {
-        public string RegionId;        // "CELLREGIONPOL-01"
-        public string PlaceId;         // "PLCORBITALHADES01"
-        public string TimeOfDay;       // "permanent-night-cycle"
+        public string RegionId;
+        public string PlaceId;
+        public string TimeOfDay;   // e.g. "permanent-night-cycle"
         public bool LowOxygen;
         public bool NightCycle;
         public HorrorMode[] ActiveModes;
+        public string[] ActiveTaboos;   // e.g. ["TABSVENTSILENCE01"]
     }
-
-    // ---------- TEMPLATES FOR AI‑ASSISTED GENERATION ----------
 
     [CreateAssetMenu(
         fileName = "LorewayNarrativeTemplate",
@@ -77,24 +76,23 @@ namespace Cell.Loreway
         public HorrorFunction[] SupportedFunctions;
 
         [Header("Motif Tokens (Slavic / Space)")]
-        [Tooltip("Imagery fragments for the generator to weave into descriptions.")]
-        public string[] LandscapeMotifs;     // e.g. "vent labyrinth", "frosted bulkheads"
-        public string[] SpiritMotifs;        // e.g. "blue corona", "breathing ship"
-        public string[] HumanMiseryMotifs;   // e.g. "oxygen debt", "ration riots"
+        public string[] LandscapeMotifs;
+        public string[] SpiritMotifs;
+        public string[] HumanMiseryMotifs;
 
-        [Header("Taboo & Ritual Hooks")]
-        public string[] TabooIds;            // e.g. "TABSVENTSILENCE01"
-        public string[] SpiritIds;           // e.g. "SPRTAZUREHOWLER01";
+        [Header("Taboo & Spirit Hooks")]
+        public string[] TabooIds;
+        public string[] SpiritIds;
 
         [Header("Beat Skeletons")]
         [TextArea(2, 6)]
-        public string[] BeatPrompts;         // natural-language seeds for AI
+        public string[] BeatPrompts;
 
         [Header("Dialogue Style Hints")]
         [Range(1, 20)] public int MaxLinesPerUnit = 6;
         [Range(4, 22)] public int MaxWordsPerLine = 18;
-        public bool RequireContradictionLine = true;   // at least one lie per unit
-        public bool RequireImpliedRuleLine = true;     // at least one implied taboo/rule
+        public bool RequireContradictionLine = true;
+        public bool RequireImpliedRuleLine = true;
     }
 
     [Serializable]
@@ -103,7 +101,7 @@ namespace Cell.Loreway
         public string Id;
         public HorrorFunction Function;
         [TextArea(2, 6)] public string Description;
-        public string[] SystemHooks;   // e.g. "spawn-ambush-pack", "lower-ambient-music"
+        public string[] SystemHooks;
     }
 
     [Serializable]
@@ -121,8 +119,8 @@ namespace Cell.Loreway
     {
         public string Id;
         public List<GeneratedLine> Lines = new List<GeneratedLine>();
-        public string[] Triggers;      // e.g. "on_first_enter_scene"
-        public string StyleProfile;    // copy from template or speaker profile
+        public string[] Triggers;
+        public string StyleProfile;
     }
 
     [Serializable]
@@ -134,8 +132,6 @@ namespace Cell.Loreway
         public GeneratedDialogueUnit Dialogue;
     }
 
-    // ---------- RUNTIME GENERATOR ----------
-
     public class LorewayStoryGenerator : ScriptableObject
     {
         [Header("Input Libraries")]
@@ -146,18 +142,16 @@ namespace Cell.Loreway
         [Range(0f, 1f)] public float LieProbability = 0.35f;
         [Range(0f, 1f)] public float MoralAnxietyBias = 0.5f;
 
-        System.Random _rng;
+        private System.Random _rng;
 
-        void OnEnable()
+        private void OnEnable()
         {
             _rng = new System.Random(Environment.TickCount);
         }
 
         public GeneratedScenePacket GenerateScene(SceneContext context, string seed = null)
         {
-            if (_rng == null) _rng = new System.Random(Environment.TickCount);
-            if (!string.IsNullOrEmpty(seed))
-                _rng = new System.Random(seed.GetHashCode());
+            EnsureRng(seed);
 
             var template = PickTemplate(context);
             if (template == null)
@@ -172,35 +166,47 @@ namespace Cell.Loreway
                 Context = context
             };
 
-            // Generate beats
-            int beatCount = Math.Min(template.MaxBeats, template.BeatPrompts.Length);
+            int beatCount = Mathf.Min(template.MaxBeats, template.BeatPrompts.Length);
             for (int i = 0; i < beatCount; i++)
             {
                 var func = PickHorrorFunction(template);
-                packet.Beats.Add(new GeneratedBeat
+
+                var beat = new GeneratedBeat
                 {
                     Id = $"{packet.SceneId}-BEAT-{i + 1}",
                     Function = func,
-                    Description = SynthesizeBeatDescription(template, template.BeatPrompts[i], func),
+                    Description = SynthesizeBeatDescription(
+                        template,
+                        template.BeatPrompts[i],
+                        func,
+                        context),
                     SystemHooks = SynthesizeSystemHooks(func, context)
-                });
+                };
+
+                packet.Beats.Add(beat);
             }
 
-            // Generate dialogue unit bound to this scene
             packet.Dialogue = GenerateDialogueUnit(context, template, packet.SceneId);
-
             return packet;
         }
 
-        // ---------- TEMPLATE SELECTION & HELPERS ----------
+        void EnsureRng(string seed)
+        {
+            if (_rng == null)
+                _rng = new System.Random(Environment.TickCount);
+
+            if (!string.IsNullOrEmpty(seed))
+                _rng = new System.Random(seed.GetHashCode());
+        }
 
         LorewayNarrativeTemplate PickTemplate(SceneContext context)
         {
             var candidates = Templates.Where(t =>
-                t.SupportedModes.Intersect(context.ActiveModes).Any()).ToList();
+                    t.SupportedModes.Intersect(context.ActiveModes ?? Array.Empty<HorrorMode>()).Any())
+                .ToList();
 
             if (candidates.Count == 0)
-                candidates = Templates; // fallback
+                candidates = Templates;
 
             int idx = _rng.Next(candidates.Count);
             return candidates[idx];
@@ -208,7 +214,6 @@ namespace Cell.Loreway
 
         HorrorFunction PickHorrorFunction(LorewayNarrativeTemplate template)
         {
-            // Bias moral anxiety when requested
             if (_rng.NextDouble() < MoralAnxietyBias &&
                 template.SupportedFunctions.Contains(HorrorFunction.MoralAnxiety))
             {
@@ -221,26 +226,31 @@ namespace Cell.Loreway
 
         string BuildSceneId(SceneContext ctx, string templateId)
         {
-            return $"SCN-{ctx.PlaceId}-{templateId}-{Guid.NewGuid().ToString("N").Substring(0, 6)}";
+            var guid = Guid.NewGuid().ToString("N").Substring(0, 6);
+            return $"SCN-{ctx.PlaceId}-{templateId}-{guid}";
         }
 
         string SynthesizeBeatDescription(
             LorewayNarrativeTemplate template,
             string prompt,
-            HorrorFunction function)
+            HorrorFunction function,
+            SceneContext ctx)
         {
-            // This is where your AI model or prompt system plugs in.
-            // The stub below gives a fallback for offline/editor preview.
+            var landscape = PickRandom(template.LandscapeMotifs);
+            var spirit = PickRandom(template.SpiritMotifs);
+            var misery = PickRandom(template.HumanMiseryMotifs);
+            var functionTag = function.ToString().ToLowerInvariant();
 
-            string landscape = PickRandom(template.LandscapeMotifs);
-            string spirit = PickRandom(template.SpiritMotifs);
-            string misery = PickRandom(template.HumanMiseryMotifs);
-
-            string functionTag = function.ToString().ToLowerInvariant();
+            string tabooHint = string.Empty;
+            if (ctx.ActiveTaboos != null && ctx.ActiveTaboos.Length > 0)
+            {
+                tabooHint = $" Something in the metal remembers \"{ctx.ActiveTaboos[0]}\".";
+            }
 
             return $"{prompt} [{functionTag}] " +
-                   $"You catch a hint of {spirit} above the {landscape}, " +
-                   $"while {misery} presses in from the edges.";
+                   $"You catch a smear of {spirit} above the {landscape}, " +
+                   $"while {misery} presses at the edge of your breath." +
+                   tabooHint;
         }
 
         string[] SynthesizeSystemHooks(HorrorFunction function, SceneContext ctx)
@@ -269,6 +279,12 @@ namespace Cell.Loreway
             if (ctx.LowOxygen)
                 hooks.Add("tighten-oxygen-threshold");
 
+            if (ctx.ActiveTaboos != null &&
+                ctx.ActiveTaboos.Contains("TABSVENTSILENCE01"))
+            {
+                hooks.Add("reroute_growlers_toward_vent_noise");
+            }
+
             return hooks.ToArray();
         }
 
@@ -277,8 +293,6 @@ namespace Cell.Loreway
             if (array == null || array.Length == 0) return string.Empty;
             return array[_rng.Next(array.Length)];
         }
-
-        // ---------- DIALOGUE GENERATION ----------
 
         GeneratedDialogueUnit GenerateDialogueUnit(
             SceneContext context,
@@ -301,10 +315,11 @@ namespace Cell.Loreway
 
             for (int i = 0; i < lineLimit; i++)
             {
-                LineIntent intent = PickLineIntent(usedContradiction, usedRule, i == lineLimit - 1);
-                Reliability reliability = PickReliability(intent);
+                bool lastLine = (i == lineLimit - 1);
+                var intent = PickLineIntent(usedContradiction, usedRule, lastLine, template);
+                var reliability = PickReliability(intent);
 
-                string text = SynthesizeLineText(context, template, speaker, intent, reliability);
+                var text = SynthesizeLineText(context, template, speaker, intent, reliability);
 
                 unit.Lines.Add(new GeneratedLine
                 {
@@ -322,12 +337,16 @@ namespace Cell.Loreway
             return unit;
         }
 
-        LineIntent PickLineIntent(bool usedContradiction, bool usedRule, bool lastLine)
+        LineIntent PickLineIntent(
+            bool usedContradiction,
+            bool usedRule,
+            bool lastLine,
+            LorewayNarrativeTemplate template)
         {
-            // Ensure at least one contradiction and one implied rule if requested
-            if (lastLine && !usedContradiction)
+            if (lastLine && template.RequireContradictionLine && !usedContradiction)
                 return LineIntent.ContradictEvidence;
-            if (lastLine && !usedRule)
+
+            if (lastLine && template.RequireImpliedRuleLine && !usedRule)
                 return LineIntent.ImplyRule;
 
             int roll = _rng.Next(100);
@@ -360,25 +379,25 @@ namespace Cell.Loreway
             LineIntent intent,
             Reliability reliability)
         {
-            // Stub: structured phrase builder that your AI can replace or extend.
-            // Keeps lines short and concrete for horror VO.
-
-            string place = ctx.PlaceId.Contains("HADES")
-                ? "these decks"
-                : "this place";
+            bool ventTaboo = ctx.ActiveTaboos != null &&
+                             ctx.ActiveTaboos.Contains("TABSVENTSILENCE01");
 
             switch (intent)
             {
                 case LineIntent.EvokeThreat:
-                    return "They learned the vents faster than we learned the map.";
+                    return ventTaboo
+                        ? "They hear through the vents now; the ship teaches them our paths."
+                        : "Out here, noise travels farther than light and cuts deeper.";
                 case LineIntent.ImplyRule:
-                    return "If you value your lungs, don’t teach the ducts your voice.";
+                    return ventTaboo
+                        ? "If you want to live, don’t let the ducts learn your voice."
+                        : "Don’t name what you see after midnight; it remembers.";
                 case LineIntent.RevealFlaw:
-                    return "I shouted once, just to hear something human answer.";
+                    return "I broke the rule once, just to feel less alone.";
                 case LineIntent.ContradictEvidence:
-                    return reliability == Reliability.KnownFalse
-                        ? "No one’s died up here since the moon turned blue."
-                        : "They say the howls stopped after the last purge.";
+                    if (reliability == Reliability.KnownFalse)
+                        return "No one’s died on this deck since the blue moon came up.";
+                    return "They say the howls stopped after the last purge.";
                 case LineIntent.DeflectTruth:
                 default:
                     return "It’s just metal settling. That’s what we tell the rookies.";
