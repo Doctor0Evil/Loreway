@@ -73,3 +73,145 @@ local DEFAULT_PROFILE = {
 }
 
 LorewayPersonality.DEFAULT_PROFILE = DEFAULT_PROFILE
+----------------------------------------------------------------------
+-- Utility helpers
+----------------------------------------------------------------------
+
+local function clamp01(x)
+    if x < 0.0 then return 0.0 end
+    if x > 1.0 then return 1.0 end
+    return x
+end
+
+local function lerp(a, b, t)
+    return a + (b - a) * t
+end
+
+local function deep_copy(tbl)
+    local out = {}
+    for k, v in pairs(tbl) do
+        if type(v) == "table" then
+            out[k] = deep_copy(v)
+        else
+            out[k] = v
+        end
+    end
+    return out
+end
+
+----------------------------------------------------------------------
+-- Personality construction and blending
+----------------------------------------------------------------------
+
+---Create a new personality by overriding defaults with partial fields.
+---@param id string
+---@param label string
+---@param overrides table|nil
+---@return LorewayPersonalityProfile
+function LorewayPersonality.new_profile(id, label, overrides)
+    local p = deep_copy(DEFAULT_PROFILE)
+    p.id = id or p.id
+    p.label = label or p.label
+
+    overrides = overrides or {}
+
+    local function merge_scalar(path, defaultValue)
+        local t = overrides
+        for i = 1, #path - 1 do
+            local key = path[i]
+            t = t[key]
+            if t == nil then return end
+        end
+        local leaf = path[#path]
+        if t and t[leaf] ~= nil then
+            local current = p
+            for i = 1, #path - 1 do
+                current = current[path[i]]
+            end
+            current[leaf] = clamp01(t[leaf])
+        end
+    end
+
+    -- Brutality
+    merge_scalar({ "brutality", "global" }, p.brutality.global)
+    merge_scalar({ "brutality", "physical" }, p.brutality.physical)
+    merge_scalar({ "brutality", "psychological" }, p.brutality.psychological)
+    merge_scalar({ "brutality", "social" }, p.brutality.social)
+
+    -- Horror
+    merge_scalar({ "horror", "dread" }, p.horror.dread)
+    merge_scalar({ "horror", "shock" }, p.horror.shock)
+    merge_scalar({ "horror", "disgust" }, p.horror.disgust)
+    merge_scalar({ "horror", "uncanny" }, p.horror.uncanny)
+    merge_scalar({ "horror", "moral_anxiety" }, p.horror.moral_anxiety)
+
+    -- Slavic tones
+    merge_scalar({ "slavic", "rural_decay" }, p.slavic.rural_decay)
+    merge_scalar({ "slavic", "bureaucratic_horror" }, p.slavic.bureaucratic_horror)
+    merge_scalar({ "slavic", "domestic_haunting" }, p.slavic.domestic_haunting)
+    merge_scalar({ "slavic", "cosmic_rot" }, p.slavic.cosmic_rot)
+
+    -- Temperatures
+    if overrides.surreal_temperature ~= nil then
+        p.surreal_temperature = clamp01(overrides.surreal_temperature)
+    end
+    if overrides.narrative_temperature ~= nil then
+        p.narrative_temperature = clamp01(overrides.narrative_temperature)
+    end
+    if overrides.horror_temperature ~= nil then
+        p.horror_temperature = clamp01(overrides.horror_temperature)
+    end
+
+    return p
+end
+
+---Blend two profiles over t (0..1).
+---@param a LorewayPersonalityProfile
+---@param b LorewayPersonalityProfile
+---@param t number
+---@return LorewayPersonalityProfile
+function LorewayPersonality.blend_profiles(a, b, t)
+    t = clamp01(t)
+    local p = deep_copy(a)
+    p.id    = a.id .. "_BLEND_" .. b.id
+    p.label = "Blend(" .. a.label .. ", " .. b.label .. ")"
+
+    local function blend_field(path)
+        local left = a
+        local right = b
+        local dest = p
+        for i = 1, #path - 1 do
+            left  = left[path[i]]
+            right = right[path[i]]
+            dest  = dest[path[i]]
+        end
+        local k = path[#path]
+        dest[k] = clamp01(lerp(left[k], right[k], t))
+    end
+
+    -- Brutality
+    blend_field({ "brutality", "global" })
+    blend_field({ "brutality", "physical" })
+    blend_field({ "brutality", "psychological" })
+    blend_field({ "brutality", "social" })
+
+    -- Horror
+    blend_field({ "horror", "dread" })
+    blend_field({ "horror", "shock" })
+    blend_field({ "horror", "disgust" })
+    blend_field({ "horror", "uncanny" })
+    blend_field({ "horror", "moral_anxiety" })
+
+    -- Slavic tones
+    blend_field({ "slavic", "rural_decay" })
+    blend_field({ "slavic", "bureaucratic_horror" })
+    blend_field({ "slavic", "domestic_haunting" })
+    blend_field({ "slavic", "cosmic_rot" })
+
+    -- Temperatures
+    p.surreal_temperature   = clamp01(lerp(a.surreal_temperature,   b.surreal_temperature,   t))
+    p.narrative_temperature = clamp01(lerp(a.narrative_temperature, b.narrative_temperature, t))
+    p.horror_temperature    = clamp01(lerp(a.horror_temperature,    b.horror_temperature,    t))
+
+    return p
+end
