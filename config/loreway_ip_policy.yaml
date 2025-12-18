@@ -1,0 +1,88 @@
+loreway_ip_policy:
+  version: "1.0"
+  project: "Cell"
+  description: "Hard-wired safeguards to prevent inclusion of external companies, products, or creative works in Loreway data. All outputs must be original to Cell's adult Slavic-horror world."
+  global_constraints:
+    external_reference_allowed_default: false
+    require_internal_source_for_all_nodes: true
+    allow_public_domain_structures_only: true  # Structures (e.g., taboo patterns) ok if provenance-marked, but no literal names/text.
+    error_on_violation: "Block save/commit and prompt: 'External IP detected—remove/rename before proceeding.'"
+  blacklists:
+    companies:
+      - "Rockstar Games"
+      - "Acid Wizard Studio"
+      - "Ice-Pick Lodge"
+      - "Frictional Games"
+      - "Remedy Entertainment"
+      - "BioWare"
+      - "Capcom"
+      - "Ghost Story Games"
+      # Add more as needed; load from external txt for scalability.
+    products:
+      - "Darkwood"
+      - "Pathologic"
+      - "Amnesia"
+      - "SOMA"
+      - "Alan Wake"
+      - "Grand Theft Auto"
+      - "Red Dead Redemption"
+      - "Resident Evil"
+      - "Silent Hill"
+      # Extend with known games, books, films (e.g., "Roadside Picnic", "Stalker").
+    creative_works:
+      - "Stanisław Lem"  # Authors, titles, characters.
+      - "Strugatsky Brothers"
+      - "Andrei Tarkovsky"
+      - "David Lynch"
+      - "Stanley Kubrick"
+      - "Hideo Kojima"
+      # Include figures like "Susan O'Connor", "Whitney Beltrán", etc.
+    fuzzy_match_thresholds:
+      levenshtein_distance_max: 2  # e.g., "Darkwod" flags as too close to "Darkwood".
+      token_overlap_min: 0.7  # Shared words/phrases trigger.
+  scan_targets:
+    fields_to_scan:
+      - "display_name"
+      - "surname"
+      - "synopsis"
+      - "detail"
+      - "key_features[]"
+      - "text_variants[]"
+      - "description_in_world"
+      - "folklore_function"
+      - "narrative_tags[]"
+      - "appearance_descriptors[]"
+    node_types_to_enforce:
+      - "Spirit_Node"
+      - "Place_Node"
+      - "Family_Node"
+      - "Event_Node"
+      - "Taboo_Node"
+      - "Object_Node"
+      - "Rumor_Node"
+      - "Character_Node"  # Extend from your schema.
+    edge_properties_to_scan:
+      - "conditions[]"
+  validation_rules:
+    on_generation:
+      - "Scan all string fields against blacklists (exact + fuzzy)."
+      - "If match: reject output and log 'External IP match in [field]: [value] resembles [blacklist_entry].'"
+      - "Prohibit any text matching titles/characters from external media databases."
+      - "Enforce: All names must be generated via Cell's internal name generator or manually authored by Cell team."
+      - "Require provenance.source in ['internal_original', 'derived_public_domain'] for all nodes."
+    on_save_or_commit:
+      - "Recursively scan YAML/JSON files in lore directories."
+      - "If external_reference_allowed: false (default), strip/anon any source names leaking from provenance."
+      - "Block if any field contains explicit mentions of non-Cell companies, products, franchises, films, books, games, or public figures."
+      - "Log violations to 'res://logs/loreway_ip_violations.txt' with timestamps and offending paths."
+    on_export_to_game:
+      - "Transform all concrete names to Cell-coined originals (e.g., via procedural generator)."
+      - "Ensure no raw folklore phrasing survives; only abstract motifs and roles."
+  allowed_sources:
+    - "Designer-authored prompts (Cell team only)"
+    - "Cell internal lore docs"
+    - "Procedural outputs from Loreway’s own generators (e.g., name/twist engines)"
+  error_messages:
+    default: "Loreway content must remain original to Cell. Remove or rename any external company, product, or creative-work reference before continuing."
+    fuzzy_match: "Potential IP similarity detected: '[value]' too close to blacklisted '[entry]'. Rewrite for originality."
+    provenance_missing: "Node lacks valid provenance—must specify internal source."
